@@ -207,8 +207,6 @@ class BenchProblemTestCase(unittest.TestCase):
                 "ub": "[1, 1]",
                 "outcome_type": "single_probit",
                 "strategy_names": "[init_strat, opt_strat]",
-            },
-            "experiment": {
                 "acqf": "MCLevelSetEstimation",
                 "model": "GPClassificationModel",
             },
@@ -241,13 +239,12 @@ class BenchProblemTestCase(unittest.TestCase):
                 "ub": "[1, 1]",
                 "outcome_type": "single_probit",
                 "strategy_names": "[init_strat, opt_strat]",
-            },
-            "experiment": {
                 "acqf": "MonotonicMCLSE",
                 "model": "MonotonicRejectionGP",
             },
             "init_strat": {"generator": "SobolGenerator", "n_trials": 50},
             "opt_strat": {"generator": "MonotonicRejectionGenerator", "n_trials": 1},
+            "SobolGenerator": {"seed": 1},
             "MonotonicMCLSE": {
                 "target": 0.75,
                 "beta": 3.98,

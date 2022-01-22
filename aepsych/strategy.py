@@ -7,7 +7,6 @@
 
 import warnings
 from typing import Optional, Union
-from aepsych.generators.random_generator import RandomGenerator
 from aepsych.generators.sobol_generator import SobolGenerator
 import time
 
@@ -22,19 +21,21 @@ from aepsych.utils_logging import getLogger
 
 logger = getLogger()
 
+
 def ensure_model_is_fresh(f):
     def wrapper(self, *args, **kwargs):
         if self.has_model and not self._model_is_fresh:
-            starttime = time.time()
-            if self._count % self.refit_every == 0 or self.refit_every == 1:
-                logger.info("Starting fitting (no warm start)...")
-                # don't warm start
-                self.model.fit(self.x, self.y)
-            else:
-                logger.info("Starting fitting (warm start)...")
-                # warm start
-                self.model.update(self.x, self.y)
-            logger.info(f"Fitting done, took {time.time()-starttime}")
+            if self.x is not None and self.y is not None:
+                starttime = time.time()
+                if self._count % self.refit_every == 0 or self.refit_every == 1:
+                    logger.info("Starting fitting (no warm start)...")
+                    # don't warm start
+                    self.model.fit(self.x, self.y)
+                else:
+                    logger.info("Starting fitting (warm start)...")
+                    # warm start
+                    self.model.update(self.x, self.y)
+                logger.info(f"Fitting done, took {time.time()-starttime}")
         self._model_is_fresh = True
         return f(self, *args, **kwargs)
 
@@ -70,13 +71,9 @@ class Strategy(object):
         self.refit_every = refit_every
         self._model_is_fresh = False
         self.generator = generator
-
-        if isinstance(self.generator, SobolGenerator) or isinstance(
-            self.generator, RandomGenerator
-        ):  # temporary hack until config refactor is complete
-            self.has_model = False
-        else:
-            self.has_model = True
+        self.has_model = self.model is not None
+        if self.generator._requires_model:
+            assert self.model is not None, f"{self.generator} requires a model!"
 
     def normalize_inputs(self, x, y):
         """converts inputs into normalized format for this strategy
@@ -128,12 +125,12 @@ class Strategy(object):
         return self.generator.gen(num_points, self.model)
 
     @ensure_model_is_fresh
-    def get_max(self):
-        return self.model.get_max()
+    def get_max(self, constraints):
+        return self.model.get_max(constraints)
 
     @ensure_model_is_fresh
-    def get_min(self):
-        return self.model.get_min()
+    def get_min(self, constraints):
+        return self.model.get_min(constraints)
 
     @ensure_model_is_fresh
     def inv_query(self, y, constraints, probability_space=False):
@@ -161,12 +158,20 @@ class Strategy(object):
 
     @classmethod
     def from_config(cls, config: Config, name: str):
-        model_cls = config.getobj("experiment", "model", fallback=None)
+        gen_cls = config.getobj(name, "generator", fallback=SobolGenerator)
+        generator = gen_cls.from_config(config)
 
+        model_cls = config.getobj(name, "model", fallback=None)
         if model_cls is not None:
             model = model_cls.from_config(config)
         else:
             model = None
+
+        acqf_cls = config.getobj(name, "acqf", fallback=None)
+        if acqf_cls is not None and hasattr(generator, "acqf"):
+            if generator.acqf is None:
+                generator.acqf = acqf_cls
+                generator.acqf_kwargs = generator._get_acqf_options(acqf_cls, config)
 
         n_trials = config.getint(name, "n_trials")
         refit_every = config.getint(name, "refit_every", fallback=1)
@@ -174,11 +179,6 @@ class Strategy(object):
         lb = config.gettensor(name, "lb")
         ub = config.gettensor(name, "ub")
         dim = config.getint(name, "dim", fallback=None)
-
-        # Temporary hack until config refactor is complete
-        # Prevents user from having to specify number of sobol trials twice in config
-        gen_cls = config.getobj(name, "generator", fallback=SobolGenerator)
-        generator = gen_cls.from_config(config)
 
         outcome_type = config.get(name, "outcome_type", fallback="single_probit")
 
